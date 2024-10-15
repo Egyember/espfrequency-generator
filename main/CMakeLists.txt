@@ -3,4 +3,6 @@ idf_component_register(SRCS "wifi_teszt.c"
 	REQUIRES esp_netif
 	REQUIRES nvs_flash
 	REQUIRES esp_wifi
+	REQUIRES broadcaster
+	REQUIRES commands
 )
