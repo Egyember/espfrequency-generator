@@ -1,5 +1,5 @@
 idf_component_register(SRCS "wifi_teszt.c"
-	INCLUDE_DIRS "."
+	INCLUDE_DIRS "." "../include"
 	REQUIRES esp_netif
 	REQUIRES nvs_flash
 	REQUIRES esp_wifi
