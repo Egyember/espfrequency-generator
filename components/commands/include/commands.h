@@ -1,6 +1,11 @@
 #ifndef COMMANDS
 #define COMMANDS
 
+enum packettype {
+	COMMAND =0,
+	DATA = 1,
+};
+
 enum commandType {
 	INVALID = 0,
 	HELP = 1,
@@ -10,7 +15,8 @@ enum commandType {
 };
 typedef struct command {
 	enum commandType command;
-	void *args;
+	unsigned int argnum;
+	void *args; //pointer to array of args with argnum length
 } command;
 typedef struct node {
 	int freq;
