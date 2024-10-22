@@ -36,6 +36,11 @@ command *readCommand(int soc) {
 	}
 	ntohlRange(commandbuffer, 3);
 	command *com = malloc(sizeof(command));
+	if(com == NULL) { // malloc failed
+		ESP_LOGE(commandTag,
+			 "failed to alloc memory for command");
+		return NULL;
+	};
 	if(commandbuffer[0] == COMMAND) {
 		com->command = commandbuffer[1];
 		com->argnum = commandbuffer[2];
@@ -57,7 +62,7 @@ command *readCommand(int soc) {
 	};
 	int readBytes = 0;
 	do {
-		err = read(soc, argbuffer,
+		err = read(soc, argbuffer+readBytes,
 			   (sizeof(int32_t) * 3 * com->argnum) - readBytes);
 		if(err < 0) {
 			ESP_LOGE(commandTag, "arg read failed");
@@ -69,8 +74,22 @@ command *readCommand(int soc) {
 		ESP_LOGI(commandTag,
 			 "recived %d bythes", readBytes);
 	} while(readBytes >= sizeof(int32_t) * 3 * com->argnum);
+	int32_t *args = malloc(sizeof(int32_t)*2*com->argnum);
 	for(int i = 0; i < com->argnum; i++) {
+		if (argbuffer[i*3] == DATA) {
+		args[i*2] = argbuffer[1+ i*3];
+		args[i*2+1] = argbuffer[2+ i*3];
+		} else {
+			ESP_LOGE(commandTag, "invalid data packet");
+			free(args);
+			free(com);
+			free(argbuffer);
+			return NULL;
+		}
+
 	}
+	free(argbuffer);
+	com->args = args;
 	return com;
 };
 
@@ -78,16 +97,18 @@ void doCommand(command *comm) {
 	ESP_LOGI(commandTag, "doing command");
 	switch(comm->command) {
 	case INVALID:
+		ESP_LOGD(commandTag, "invalid command");
 		return;
 		break;
 	case PLAY:
-		ESP_LOGI(commandTag, "play command");
+		ESP_LOGD(commandTag, "play command");
 		node *arg = comm->args;
 		dac_cosine_handle_t handler = startFreq(arg->freq);
 		vTaskDelay(arg->time / portTICK_PERIOD_MS);
 		stopFreq(handler);
 		break;
 	default:
+		ESP_LOGD(commandTag, "not implemented command");
 		return;
 		break;
 	};
