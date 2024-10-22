@@ -10,7 +10,7 @@
 
 static char *commandTag = "COMMANDS";
 
-void ntohlRange(int32_t *buff, uint len) {
+void IRAM_ATTR ntohlRange(int32_t *buff, uint len) { //I call it a lot so put it in sram
 	for(int i = 0; i < len; i++) {
 		buff[i] = ntohl(buff[i]);
 	};
@@ -74,6 +74,7 @@ command *readCommand(int soc) {
 		ESP_LOGI(commandTag,
 			 "recived %d bythes", readBytes);
 	} while(readBytes >= sizeof(int32_t) * 3 * com->argnum);
+	ntohlRange(argbuffer, 3 * com->argnum);
 	int32_t *args = malloc(sizeof(int32_t)*2*com->argnum);
 	for(int i = 0; i < com->argnum; i++) {
 		if (argbuffer[i*3] == DATA) {
