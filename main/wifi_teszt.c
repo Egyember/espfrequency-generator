@@ -195,7 +195,7 @@ void app_main(void) {
 	struct pollfd lisener = {
 	    .fd = soc,
 	    .events = POLLIN | POLLERR,
-	    .revents = NULL,
+	    .revents = 0,
 	};
 	struct connection cons[NUMBEROFCON];
 	memset(cons, 0, sizeof(struct connection) * NUMBEROFCON);
@@ -234,18 +234,25 @@ void app_main(void) {
 			pollfds[i].events = POLLIN | POLLERR;
 			pollfds[i].revents = 0;
 		}
+		if (fdnum == 0) {
+			vTaskDelay(100 / portTICK_PERIOD_MS);
+			continue;
+		}
+		ESP_LOGI(TAG, "2th poll loop");
 		poll((struct pollfd *)&pollfds, fdnum, -1);
+		ESP_LOGI(TAG, "2th poll done loop");
 		for(int i = 0; i < fdnum; i++) {
 			if(pollfds[i].revents & POLLERR) {
 				closeConnection(&(cons[fdids[i]]));
+				continue;
 			}
 			if(pollfds[i].revents & POLLIN) {
 				command *com = readCommand(pollfds[i].fd);
 				ESP_LOGI(TAG, "got command");
 				if(com == NULL) {
 					closeConnection(&(cons[fdids[i]]));
-					freeCommand(com);
 					ESP_LOGE(TAG, "NULL command");
+					freeCommand(com);
 					continue;
 				};
 				doCommand(com);

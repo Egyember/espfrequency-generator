@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 
 static char *commandTag = "COMMANDS";
 
@@ -20,11 +21,12 @@ command *readCommand(int soc) {
 	int avalable;
 	int err = ioctl(soc, FIONREAD, &avalable);
 	if(err < 0) {
-		ESP_LOGE(commandTag, "ioctl failed");
+		ESP_LOGE(commandTag, "ioctl failed errno: %d", errno);
 		return NULL;
 	}
 	printf("avalable: %d\n", avalable);
 	if(avalable < (3 * sizeof(int))) {
+		ESP_LOGE(commandTag, "not enugh data");
 		return NULL;
 	};
 	avalable = avalable % (3 * sizeof(int));
@@ -75,7 +77,31 @@ command *readCommand(int soc) {
 			 "recived %d bythes", readBytes);
 	} while(readBytes >= sizeof(int32_t) * 3 * com->argnum);
 	ntohlRange(argbuffer, 3 * com->argnum);
-	int32_t *args = malloc(sizeof(int32_t)*2*com->argnum);
+	void *args = NULL;
+	switch (com->command) {
+		case PLAY:
+			args = malloc(sizeof(node)* com->argnum);
+			node *nargs = args;
+			for(int i = 0; i < com->argnum; i++) {
+				if (argbuffer[i*3] == DATA) {
+					nargs[i].freq = argbuffer[1+ i*3];
+					nargs[i].time = argbuffer[2+ i*3];
+				} else {
+					ESP_LOGE(commandTag, "invalid data packet");
+					free(args);
+					free(com);
+					free(argbuffer);
+					return NULL;
+				}
+
+	}
+			break;
+		default:
+			ESP_LOGI(commandTag, "not implemented command");
+			break;
+	}
+	/*
+	void *args = malloc(sizeof(int32_t)*2*com->argnum);
 	for(int i = 0; i < com->argnum; i++) {
 		if (argbuffer[i*3] == DATA) {
 		args[i*2] = argbuffer[1+ i*3];
@@ -89,6 +115,7 @@ command *readCommand(int soc) {
 		}
 
 	}
+	*/
 	free(argbuffer);
 	com->args = args;
 	return com;
@@ -116,6 +143,10 @@ void doCommand(command *comm) {
 };
 
 void freeCommand(command *command) {
+	if (command == NULL) {
+		ESP_LOGW(commandTag, "NULL command free atempt");
+		return;
+	}
 	if(command->command == PLAY) {
 		free(command->args);
 	}
