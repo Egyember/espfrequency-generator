@@ -19,7 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define SSID "Látlak"
+#define SSID "tp_doos_2,4GHz"
 #define PASSWD "Zsombika70671"
 #define AUTMETOD WIFI_AUTH_WPA2_PSK
 #define WIFICHANEL 1
@@ -62,7 +62,7 @@ int validConnections(const struct connection *connections,
  *used to get first avalable connection slot index
  -1 if no connection avalable
  */
-int unusedConnections(const struct connection *connections, unsigned int N) {
+int getFreeConnection(const struct connection *connections, unsigned int N) {
 	for(int i = 0; i < N; i++) {
 		if(!connections[i].valid) {
 			return i;
@@ -206,19 +206,17 @@ void app_main(void) {
 	while(true) {
 		poll(&lisener, 1, 0);
 		if(lisener.revents & POLLIN) {
-			int id = unusedConnections(cons, NUMBEROFCON);
-			if(id < 0) {
+			int connectionId = getFreeConnection(cons, NUMBEROFCON);
+			if(connectionId < 0) {
 				ESP_LOGI(TAG, "no free connection slot left");
 				goto DONTADDCON;
 			}
-			cons[id].fd =
-			    accept(soc, (struct sockaddr *)&cons[id].target,
-				   &sockaddr_storage_len);
-			if(cons[id].fd < 0) {
-				cons[id].valid = false;
+			cons[connectionId].fd = accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
+			if(cons[connectionId].fd < 0) {
+				cons[connectionId].valid = false;
 			} else {
 
-				cons[id].valid = true;
+				cons[connectionId].valid = true;
 			};
 		}
 		if (lisener.revents & POLLERR) {
@@ -242,6 +240,7 @@ void app_main(void) {
 		poll((struct pollfd *)&pollfds, fdnum, -1);
 		ESP_LOGI(TAG, "2th poll done loop");
 		for(int i = 0; i < fdnum; i++) {
+			printf("pollfds[%d].revents = %x\n", i, pollfds[i].revents);
 			if(pollfds[i].revents & POLLERR) {
 				closeConnection(&(cons[fdids[i]]));
 				continue;
@@ -250,9 +249,9 @@ void app_main(void) {
 				command *com = readCommand(pollfds[i].fd);
 				ESP_LOGI(TAG, "got command");
 				if(com == NULL) {
-					closeConnection(&(cons[fdids[i]]));
 					ESP_LOGE(TAG, "NULL command");
-					freeCommand(com);
+					ESP_LOGE(TAG, "closing connection");
+					closeConnection(&(cons[fdids[i]]));
 					continue;
 				};
 				doCommand(com);
