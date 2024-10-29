@@ -1,6 +1,7 @@
 UseTab: Always
 IndentWidth: 8
 TabWidth: 8
+ColumnLimit: 120
 SpaceBeforeParens: Custom
 SpaceBeforeParensOptions:
   AfterControlStatements: false

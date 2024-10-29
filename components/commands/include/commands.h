@@ -1,5 +1,6 @@
 #ifndef COMMANDS
 #define COMMANDS
+#include <stdint.h>
 
 enum packettype {
 	COMMAND =0,
@@ -15,15 +16,15 @@ enum commandType {
 };
 typedef struct command {
 	enum commandType command;
-	unsigned int argnum;
+	int32_t argnum;
 	void *args; //pointer to array of args with argnum length
 } command;
 typedef struct node {
-	int freq;
-	int time; // in ms
+	int32_t freq;
+	int32_t time; // in ms
 } node;
 typedef struct sheet {
-	int N;
+	int32_t N;
 	node *data;
 } sheet;
 command *readCommand(int soc);

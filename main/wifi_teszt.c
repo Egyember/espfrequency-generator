@@ -24,7 +24,7 @@
 #define AUTMETOD WIFI_AUTH_WPA2_PSK
 #define WIFICHANEL 1
 #define WIFIDONEBIT BIT0
-#define NUMBEROFCON 16
+#define NUMBEROFCON 14
 
 #define COMPORT 40001
 
@@ -42,8 +42,7 @@ struct connection {
 	bool valid; // used to indicate open connetions
 };
 
-int validConnections(const struct connection *connections,
-		     const unsigned int conectionsNumber, int *target,
+int getValidConnectionsNum(const struct connection *connections, const unsigned int conectionsNumber, int *target,
 		     int *targetId, const unsigned int targetSize) {
 	int output = 0;
 	for(int i = 0; i < conectionsNumber; i++) {
@@ -78,8 +77,7 @@ void closeConnection(struct connection *connection) {
 
 struct localIp *localIp;
 
-void wifi_event_handler(void *arg, esp_event_base_t event_base,
-			int32_t event_id, void *event_data) {
+void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 	if(event_base == WIFI_EVENT) {
 		ESP_LOGI(TAG, "wifi event");
 		switch(event_id) {
@@ -105,21 +103,17 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base,
 	}
 };
 
-void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
-		      void *event_data) {
+void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 	if(event_base == IP_EVENT) {
 		ESP_LOGI(TAG, "ip event");
 		if(event_id == IP_EVENT_STA_GOT_IP) {
 			// ESP_ERROR_CHECK(esp_netif_dhcpc_stop(arg));
-			ip_event_got_ip_t *event =
-			    (ip_event_got_ip_t *)event_data;
-			ESP_LOGI(TAG, "static ip:" IPSTR,
-				 IP2STR(&event->ip_info.ip));
+			ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+			ESP_LOGI(TAG, "static ip:" IPSTR, IP2STR(&event->ip_info.ip));
 			xSemaphoreTake(localIp->lock, portMAX_DELAY);
 			localIp->ip = event->ip_info.ip.addr;
 			localIp->mask = event->ip_info.netmask.addr;
-			xTaskCreate(broadcaster, "broadcaster", 1024 * 2,
-				    localIp, tskIDLE_PRIORITY,
+			xTaskCreate(broadcaster, "broadcaster", 1024 * 2, localIp, tskIDLE_PRIORITY,
 				    &(localIp->broadcaster));
 			xSemaphoreGive(localIp->lock);
 			xEventGroupSetBits(wifi_eventGroup, WIFIDONEBIT);
@@ -151,11 +145,10 @@ void app_main(void) {
 	localIp = malloc(sizeof *localIp);
 	localIp->lock = xSemaphoreCreateMutex();
 
-	ESP_ERROR_CHECK(esp_event_handler_instance_register(
-	    WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint,
-	    &wifieventh));
-	ESP_ERROR_CHECK(esp_event_handler_instance_register(
-	    IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
+	ESP_ERROR_CHECK(
+	    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint, &wifieventh));
+	ESP_ERROR_CHECK(
+	    esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
 	wifi_config_t wificonfig = {
 	    .sta =
 		{
@@ -170,14 +163,11 @@ void app_main(void) {
 	ESP_ERROR_CHECK(esp_wifi_start());
 	ESP_LOGI(TAG, "wifi_init_sta finished.");
 	ESP_LOGI(TAG, "event mageic started");
-	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE,
-			    portMAX_DELAY);
+	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
 	ESP_LOGI(TAG, "done!!!!!");
 	int soc = socket(AF_INET, SOCK_STREAM, 0);
-	struct sockaddr_in addr = {.sin_family = AF_INET,
-				   .sin_addr.s_addr = INADDR_ANY,
-				   .sin_port = htons(COMPORT)
+	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = htons(COMPORT)
 
 	};
 	int err = bind(soc, (struct sockaddr *)&addr, sizeof(addr));
@@ -211,7 +201,8 @@ void app_main(void) {
 				ESP_LOGI(TAG, "no free connection slot left");
 				goto DONTADDCON;
 			}
-			cons[connectionId].fd = accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
+			cons[connectionId].fd =
+			    lwip_accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
 			if(cons[connectionId].fd < 0) {
 				cons[connectionId].valid = false;
 			} else {
@@ -219,20 +210,19 @@ void app_main(void) {
 				cons[connectionId].valid = true;
 			};
 		}
-		if (lisener.revents & POLLERR) {
+		if(lisener.revents & POLLERR) {
 			ESP_LOGE(TAG, "failed to lisen soc jumping to cleanup");
 			goto CLEANUPWITHSOC;
 		}
 	DONTADDCON:
-		fdnum = validConnections(cons, NUMBEROFCON, fds, fdids,
-					 NUMBEROFCON);
+		fdnum = getValidConnectionsNum(cons, NUMBEROFCON, fds, fdids, NUMBEROFCON);
 		struct pollfd pollfds[fdnum];
 		for(int i = 0; i < fdnum; i++) {
 			pollfds[i].fd = fds[i];
 			pollfds[i].events = POLLIN | POLLERR;
 			pollfds[i].revents = 0;
 		}
-		if (fdnum == 0) {
+		if(fdnum == 0) {
 			vTaskDelay(100 / portTICK_PERIOD_MS);
 			continue;
 		}
@@ -242,6 +232,7 @@ void app_main(void) {
 		for(int i = 0; i < fdnum; i++) {
 			printf("pollfds[%d].revents = %x\n", i, pollfds[i].revents);
 			if(pollfds[i].revents & POLLERR) {
+				ESP_LOGI(TAG, "cleaing up bad connection");
 				closeConnection(&(cons[fdids[i]]));
 				continue;
 			}
@@ -264,10 +255,8 @@ CLEANUPWITHSOC:
 	ESP_LOGI(TAG, "bro");
 CLEANUP:
 	esp_wifi_stop();
-	esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID,
-					      wifieventh);
-	esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID,
-					      ipeventh);
+	esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifieventh);
+	esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, ipeventh);
 	esp_wifi_deinit();
 	esp_netif_destroy_default_wifi(netint);
 	esp_netif_deinit();
