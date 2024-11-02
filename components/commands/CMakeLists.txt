@@ -1,4 +1,5 @@
 idf_component_register(SRCS "commands.c"
 	INCLUDE_DIRS "include"
-	REQUIRES gpioout
+	RREQUIRES esp_driver_gptimer
+	EQUIRES gpioout
 )

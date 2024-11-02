@@ -2,21 +2,18 @@
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
 #include "gpioout.h"
+#include "lwip/sockets.h"
 #include "sys/ioctl.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "lwip/sockets.h"
-/*
-#define LWIP_PROVIDE_ERRNO
-#undef LWIP_HDR_ERRNO_H
-*/
-#include "lwip/errno.h"
+#include "driver/gptimer.h"
 
+#define TIMEOUT 10000
 
 static char *commandTag = "COMMANDS";
 
-void IRAM_ATTR ntohlRange(int32_t *buff, uint len) { //I call it a lot so put it in sram
+void IRAM_ATTR ntohlRange(int32_t *buff, uint len) { // I call it a lot so put it in sram
 	for(int i = 0; i < len; i++) {
 		buff[i] = ntohl(buff[i]);
 	};
@@ -24,31 +21,28 @@ void IRAM_ATTR ntohlRange(int32_t *buff, uint len) { //I call it a lot so put it
 
 command *readCommand(int soc) {
 	int avalable;
-	int err = lwip_ioctl(soc, FIONREAD, &avalable); // fuck this shit https://github.com/espressif/esp-idf/issues/6215
+	int err = lwip_ioctl(soc, FIONREAD, &avalable); // fuck this shit
+							// https://github.com/espressif/esp-idf/issues/6215
+							// https://github.com/espressif/esp-idf/issues/319
 	if(err < 0) {
 		ESP_LOGE(commandTag, "ioctl failed errno: %s", strerror(errno));
 		return NULL;
 	};
-	printf("avalable: %d\n", avalable);
 	if(avalable < (3 * sizeof(int))) {
 		ESP_LOGE(commandTag, "not enugh data");
 		return NULL;
 	};
-	avalable = avalable % (3 * sizeof(int));
-
-
-
 	int32_t commandbuffer[3];
 	err = read(soc, commandbuffer, sizeof(int32_t) * 3);
 	if(err < 0) {
 		ESP_LOGE(commandTag, "read failed");
 		return NULL;
 	}
+	avalable = avalable - (3 * sizeof(int));
 	ntohlRange(commandbuffer, 3);
 	command *com = malloc(sizeof(command));
 	if(com == NULL) { // malloc failed
-		ESP_LOGE(commandTag,
-			 "failed to alloc memory for command");
+		ESP_LOGE(commandTag, "failed to alloc memory for command");
 		return NULL;
 	};
 	if(commandbuffer[0] == COMMAND) {
@@ -63,18 +57,17 @@ command *readCommand(int soc) {
 		com->args = NULL; // not initialized when created
 		return com;
 	};
-	ESP_LOGI( commandTag, "size: %lu\n", sizeof(int32_t) * 3 * com->argnum);
 	int32_t *argbuffer = malloc(sizeof(int32_t) * 3 * com->argnum);
 	if(argbuffer == NULL) { // malloc failed
-		ESP_LOGE(commandTag,
-			 "failed to alloc memory for command argument");
+		ESP_LOGE(commandTag, "failed to alloc memory for command argument");
 		free(com);
 		return NULL;
 	};
-	int readBytes = 0;
+	//I don't like this
+	size_t needed = sizeof(int32_t) * 3 * com->argnum;
+	
 	do {
-		err = read(soc, argbuffer+readBytes,
-			   (sizeof(int32_t) * 3 * com->argnum) - readBytes);
+		err = read(soc, argbuffer + readBytes, needed - readBytes);
 		if(err < 0) {
 			ESP_LOGE(commandTag, "arg read failed");
 			free(argbuffer);
@@ -82,33 +75,30 @@ command *readCommand(int soc) {
 			return NULL;
 		};
 		readBytes += err;
-		ESP_LOGI(commandTag,
-			 "recived %d bythes", readBytes);
-	} while(false);
-			//readBytes >= sizeof(int32_t) * 3 * com->argnum);
+		ESP_LOGI(commandTag, "recived %zu bythes", readBytes);
+	} while(needed <= readBytes);
 	ntohlRange(argbuffer, 3 * com->argnum);
 	void *args = NULL;
-	switch (com->command) {
-		case PLAY:
-			args = malloc(sizeof(node)* com->argnum);
-			node *nargs = args;
-			for(int i = 0; i < com->argnum; i++) {
-				if (argbuffer[i*3] == DATA) {
-					nargs[i].freq = argbuffer[1+ i*3];
-					nargs[i].time = argbuffer[2+ i*3];
-				} else {
-					ESP_LOGE(commandTag, "invalid data packet");
-					free(args);
-					free(com);
-					free(argbuffer);
-					return NULL;
-				}
-
-	}
-			break;
-		default:
-			ESP_LOGI(commandTag, "not implemented command");
-			break;
+	switch(com->command) {
+	case PLAY:
+		args = malloc(sizeof(node) * com->argnum);
+		node *nargs = args;
+		for(int i = 0; i < com->argnum; i++) {
+			if(argbuffer[i * 3] == DATA) {
+				nargs[i].freq = argbuffer[1 + i * 3];
+				nargs[i].time = argbuffer[2 + i * 3];
+			} else {
+				ESP_LOGE(commandTag, "invalid data packet");
+				free(args);
+				free(com);
+				free(argbuffer);
+				return NULL;
+			}
+		}
+		break;
+	default:
+		ESP_LOGI(commandTag, "not implemented command");
+		break;
 	}
 	free(argbuffer);
 	com->args = args;
@@ -138,7 +128,7 @@ void doCommand(command *comm) {
 };
 
 void freeCommand(command *command) {
-	if (command == NULL) {
+	if(command == NULL) {
 		ESP_LOGW(commandTag, "NULL command free atempt");
 		return;
 	}
