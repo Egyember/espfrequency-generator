@@ -149,13 +149,10 @@ void doCommand(command *comm) {
 	case PLAY:
 		ESP_LOGI(commandTag, "play command");
 		node *arg = comm->args;
-		ESP_LOGD(commandTag, "comand: %d, freq: %ld time: %ld nodes: %ld\n", comm->command, arg->freq,
-			 arg->time, comm->argnum);
 		dac_cosine_handle_t handler = startFreq(arg->freq);
 		vTaskDelay(arg->time / portTICK_PERIOD_MS);
 		if(comm->argnum > 1) {
 			for(int i = 1; i < comm->argnum; i++) {
-				ESP_LOGD(commandTag, "freq: %ld time: %ld node: %ld\n", arg[i]->freq, arg[i]->time, i);
 				setFreq(arg[i].freq);
 				vTaskDelay(arg[i].time / portTICK_PERIOD_MS);
 			}
