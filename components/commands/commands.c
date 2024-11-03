@@ -1,4 +1,6 @@
 #include "commands.h"
+#include "driver/gptimer.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
 #include "gpioout.h"
@@ -7,8 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "driver/gptimer.h"
 
+/* timeout in ms*/
 #define TIMEOUT 10000
 
 static char *commandTag = "COMMANDS";
@@ -19,26 +21,64 @@ void IRAM_ATTR ntohlRange(int32_t *buff, uint len) { // I call it a lot so put i
 	};
 };
 
-command *readCommand(int soc) {
-	int avalable;
-	int err = lwip_ioctl(soc, FIONREAD, &avalable); // fuck this shit
-							// https://github.com/espressif/esp-idf/issues/6215
-							// https://github.com/espressif/esp-idf/issues/319
-	if(err < 0) {
-		ESP_LOGE(commandTag, "ioctl failed errno: %s", strerror(errno));
-		return NULL;
+int readWithTimeout(int soc, void *buffer, size_t needed, uint64_t timout) {
+	gptimer_handle_t timer = NULL;
+	gptimer_config_t timerConfig = {
+	    .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+	    .direction = GPTIMER_COUNT_UP,
+	    .resolution_hz = 10000000,
 	};
-	if(avalable < (3 * sizeof(int))) {
-		ESP_LOGE(commandTag, "not enugh data");
-		return NULL;
+	ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig, &timer));
+	gptimer_enable(timer);
+	uint32_t resolution;
+	ESP_ERROR_CHECK(gptimer_get_resolution(timer, &resolution));
+	gptimer_start(timer);
+	bool run = true;
+	while(run) {
+		uint64_t tick;
+		gptimer_get_raw_count(timer, &tick);
+		if(tick / resolution > timout / 1000) {
+			ESP_LOGW(commandTag, "timeout");
+			gptimer_stop(timer);
+			gptimer_disable(timer);
+			gptimer_del_timer(timer);
+			return -1;
+		};
+		int avalable;
+		int err = lwip_ioctl(soc, FIONREAD, &avalable);
+		// fuck this shit
+		// https://github.com/espressif/esp-idf/issues/6215
+		// https://github.com/espressif/esp-idf/issues/319
+		if(err < 0) {
+			ESP_LOGE(commandTag, "ioctl failed errno: %s", strerror(errno));
+			gptimer_stop(timer);
+			gptimer_disable(timer);
+			gptimer_del_timer(timer);
+			return -1;
+		};
+		if(avalable >= needed) {
+			run = false;
+		} else {
+			vTaskDelay(100 / portTICK_PERIOD_MS);
+		};
 	};
-	int32_t commandbuffer[3];
-	err = read(soc, commandbuffer, sizeof(int32_t) * 3);
+	gptimer_stop(timer);
+	gptimer_disable(timer);
+	gptimer_del_timer(timer);
+	int err = read(soc, buffer, needed);
 	if(err < 0) {
 		ESP_LOGE(commandTag, "read failed");
+		return -1;
+	};
+	return 0;
+};
+
+command *readCommand(int soc) {
+	int32_t commandbuffer[3];
+	if(readWithTimeout(soc, &commandbuffer, sizeof commandbuffer, TIMEOUT)) {
+		ESP_LOGE(commandTag, "time out");
 		return NULL;
 	}
-	avalable = avalable - (3 * sizeof(int));
 	ntohlRange(commandbuffer, 3);
 	command *com = malloc(sizeof(command));
 	if(com == NULL) { // malloc failed
@@ -63,20 +103,14 @@ command *readCommand(int soc) {
 		free(com);
 		return NULL;
 	};
-	//I don't like this
 	size_t needed = sizeof(int32_t) * 3 * com->argnum;
-	
-	do {
-		err = read(soc, argbuffer + readBytes, needed - readBytes);
-		if(err < 0) {
-			ESP_LOGE(commandTag, "arg read failed");
-			free(argbuffer);
-			free(com);
-			return NULL;
-		};
-		readBytes += err;
-		ESP_LOGI(commandTag, "recived %zu bythes", readBytes);
-	} while(needed <= readBytes);
+
+	if(readWithTimeout(soc, argbuffer, needed, TIMEOUT)) {
+		ESP_LOGE(commandTag, "arg read failed");
+		free(argbuffer);
+		free(com);
+		return NULL;
+	};
 	ntohlRange(argbuffer, 3 * com->argnum);
 	void *args = NULL;
 	switch(com->command) {
@@ -115,9 +149,17 @@ void doCommand(command *comm) {
 	case PLAY:
 		ESP_LOGI(commandTag, "play command");
 		node *arg = comm->args;
-		printf("comand: %d, freq: %ld time: %ld\n", comm->command, arg->freq, arg->time);
+		ESP_LOGD(commandTag, "comand: %d, freq: %ld time: %ld nodes: %ld\n", comm->command, arg->freq,
+			 arg->time, comm->argnum);
 		dac_cosine_handle_t handler = startFreq(arg->freq);
 		vTaskDelay(arg->time / portTICK_PERIOD_MS);
+		if(comm->argnum > 1) {
+			for(int i = 1; i < comm->argnum; i++) {
+				ESP_LOGD(commandTag, "freq: %ld time: %ld node: %ld\n", arg[i]->freq, arg[i]->time, i);
+				setFreq(arg[i].freq);
+				vTaskDelay(arg[i].time / portTICK_PERIOD_MS);
+			}
+		}
 		stopFreq(handler);
 		break;
 	default:
