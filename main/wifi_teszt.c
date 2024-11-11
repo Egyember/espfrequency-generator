@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
 
 #define SSID "tp_doos_2,4GHz"
 #define PASSWD "Zsombika70671"
@@ -27,6 +28,8 @@
 #define NUMBEROFCON 14
 
 #define COMPORT 40001
+
+#define QUEUELENGTH 32
 
 static const char *TAG = "wifi_teszt";
 EventGroupHandle_t wifi_eventGroup;
@@ -126,6 +129,15 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 	}
 };
 
+void commandloop(QueueHandle_t *xQueue){
+	while (true) {
+		command *com = NULL;
+		xQueueReceive( *xQueue, &com, portMAX_DELAY);
+		assert(com != NULL);
+		doCommand(com);
+		freeCommand(com);
+	}
+}
 void app_main(void) {
 	ESP_ERROR_CHECK(nvs_flash_init());
 	ESP_LOGI(TAG, "seting up wifi");
@@ -166,6 +178,12 @@ void app_main(void) {
 	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
 	ESP_LOGI(TAG, "done!!!!!");
+	
+	//command queue
+	TaskHandle_t queueExecuter;
+	QueueHandle_t commandQueue = xQueueCreate(QUEUELENGTH, sizeof(command*));
+	xTaskCreate((void (*)(void *)) commandloop, "command loop", 512, &commandQueue, tskIDLE_PRIORITY+1, &queueExecuter);
+	//starting tcp server
 	int soc = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = htons(COMPORT)
 
@@ -245,8 +263,7 @@ void app_main(void) {
 					closeConnection(&(cons[fdids[i]]));
 					continue;
 				};
-				doCommand(com);
-				freeCommand(com);
+				xQueueSend(commandQueue, com, 0);
 			};
 		};
 	}
@@ -254,6 +271,8 @@ CLEANUPWITHSOC:
 	close(soc);
 	ESP_LOGI(TAG, "bro");
 CLEANUP:
+	vTaskDelete(queueExecuter);
+	vQueueDelete(commandQueue);
 	esp_wifi_stop();
 	esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifieventh);
 	esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, ipeventh);
