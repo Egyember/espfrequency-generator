@@ -6,6 +6,7 @@
 #include "gpioout.h"
 #include "lwip/sockets.h"
 #include "sys/ioctl.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -140,6 +141,10 @@ command *readCommand(int soc) {
 };
 
 void doCommand(command *comm) {
+	if(comm == NULL){
+		ESP_LOGE(commandTag, "NULL command");
+	};
+	ESP_LOGI(commandTag, "%p", comm);
 	ESP_LOGI(commandTag, "doing command?");
 	switch(comm->command) {
 	case INVALID:

@@ -20,8 +20,8 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define SSID "tp_doos_2,4GHz"
-#define PASSWD "Zsombika70671"
+#define SSID "IoT_gyak"
+#define PASSWD "12345678"
 #define AUTMETOD WIFI_AUTH_WPA2_PSK
 #define WIFICHANEL 1
 #define WIFIDONEBIT BIT0
@@ -129,13 +129,20 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 	}
 };
 
-void commandloop(QueueHandle_t *xQueue){
+void commandloop(QueueHandle_t *queue){
+	if (queue == NULL) {
+		ESP_LOGE(TAG, "worng queue");
+		return;
+	};
 	while (true) {
 		command *com = NULL;
-		xQueueReceive( *xQueue, &com, portMAX_DELAY);
-		assert(com != NULL);
-		doCommand(com);
-		freeCommand(com);
+		ESP_LOGI(TAG, "ok");
+		xQueueReceive( *queue, &com, portMAX_DELAY);
+		ESP_LOGI(TAG, "?ok");
+		if(com != NULL){
+			doCommand(com);
+			freeCommand(com);
+		};
 	}
 }
 void app_main(void) {
@@ -182,7 +189,7 @@ void app_main(void) {
 	//command queue
 	TaskHandle_t queueExecuter;
 	QueueHandle_t commandQueue = xQueueCreate(QUEUELENGTH, sizeof(command*));
-	xTaskCreate((void (*)(void *)) commandloop, "command loop", 512, &commandQueue, tskIDLE_PRIORITY+1, &queueExecuter);
+	xTaskCreate((void (*)(void *)) commandloop, "command loop", 1024*5, &commandQueue, tskIDLE_PRIORITY+1, &queueExecuter);
 	//starting tcp server
 	int soc = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = htons(COMPORT)
@@ -263,13 +270,16 @@ void app_main(void) {
 					closeConnection(&(cons[fdids[i]]));
 					continue;
 				};
-				xQueueSend(commandQueue, com, 0);
+				ESP_LOGI(TAG, "adding to queue");
+				if (xQueueSend(commandQueue, &com, 0) == errQUEUE_FULL) {
+					freeCommand(com);
+					ESP_LOGI(TAG, "command queue full dropping command");
+				};
 			};
 		};
 	}
 CLEANUPWITHSOC:
 	close(soc);
-	ESP_LOGI(TAG, "bro");
 CLEANUP:
 	vTaskDelete(queueExecuter);
 	vQueueDelete(commandQueue);
