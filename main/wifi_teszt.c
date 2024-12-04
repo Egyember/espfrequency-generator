@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "sys/poll.h"
 #include <stdio.h>
@@ -46,7 +47,7 @@ struct connection {
 };
 
 int getValidConnectionsNum(const struct connection *connections, const unsigned int conectionsNumber, int *target,
-		     int *targetId, const unsigned int targetSize) {
+		int *targetId, const unsigned int targetSize) {
 	int output = 0;
 	for(int i = 0; i < conectionsNumber; i++) {
 		if(connections[i].valid) {
@@ -84,24 +85,22 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id
 	if(event_base == WIFI_EVENT) {
 		ESP_LOGI(TAG, "wifi event");
 		switch(event_id) {
-		case WIFI_EVENT_STA_START:
-			esp_wifi_connect();
-			break;
-		case WIFI_EVENT_STA_CONNECTED:
-			ESP_LOGI(TAG, "connected to wifi");
-			esp_err_t err = esp_netif_dhcpc_start(arg);
-			if(err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-				ESP_LOGI(TAG, "dhcp aready running");
-			} else {
-				ESP_ERROR_CHECK(esp_netif_dhcpc_start(arg));
-			}
-			break;
-		case WIFI_EVENT_STA_DISCONNECTED:
-			ESP_LOGI(TAG, "disconected trying to reconnect");
-			esp_wifi_connect();
-			break;
-		default:
-			ESP_LOGI(TAG, "unhandelered event");
+			case WIFI_EVENT_STA_START:
+				esp_wifi_connect();
+				break;
+			case WIFI_EVENT_STA_CONNECTED:
+				ESP_LOGI(TAG, "connected to wifi");
+				esp_err_t err = esp_netif_dhcpc_start(arg);
+				if(err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+					ESP_LOGI(TAG, "dhcp aready running");
+				};
+				break;
+			case WIFI_EVENT_STA_DISCONNECTED:
+				ESP_LOGI(TAG, "disconected trying to reconnect");
+				esp_wifi_connect();
+				break;
+			default:
+				ESP_LOGI(TAG, "unhandelered event");
 		}
 	}
 };
@@ -117,7 +116,7 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 			localIp->ip = event->ip_info.ip.addr;
 			localIp->mask = event->ip_info.netmask.addr;
 			xTaskCreate(broadcaster, "broadcaster", 1024 * 2, localIp, tskIDLE_PRIORITY,
-				    &(localIp->broadcaster));
+					&(localIp->broadcaster));
 			xSemaphoreGive(localIp->lock);
 			xEventGroupSetBits(wifi_eventGroup, WIFIDONEBIT);
 
@@ -147,6 +146,7 @@ void commandloop(QueueHandle_t *queue){
 }
 void app_main(void) {
 	ESP_ERROR_CHECK(nvs_flash_init());
+
 	ESP_LOGI(TAG, "seting up wifi");
 	wifi_eventGroup = xEventGroupCreate();
 	ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -165,18 +165,36 @@ void app_main(void) {
 	localIp->lock = xSemaphoreCreateMutex();
 
 	ESP_ERROR_CHECK(
-	    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint, &wifieventh));
+			esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint, &wifieventh));
 	ESP_ERROR_CHECK(
-	    esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
-	wifi_config_t wificonfig = {
-	    .sta =
-		{
-		    .ssid = SSID,
-		    .password = PASSWD,
-		    .threshold.authmode = AUTMETOD,
-		    .channel = WIFICHANEL,
-		},
+			esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
+
+	wifi_config_t wificonfig = {};
+	// reading config from nvs
+	nvs_handle_t nvsHandle;
+	{
+		nvs_open("wifi_auth", NVS_READONLY, &nvsHandle);
+		size_t wifiLen;
+		nvs_get_str(nvsHandle, "ssid", NULL, &wifiLen);
+		if(wifiLen > 32) {
+			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
+			btsetup(); // todo: implemnet
+		};
+		nvs_get_str(nvsHandle, "ssid", (char *)&wificonfig.sta.ssid, &wifiLen);
+
+		nvs_get_str(nvsHandle, "passwd", NULL, &wifiLen);
+		if(wifiLen > 64) { //implemention limit to passwd lenght is 64
+			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
+			btsetup(); // todo: implemnet
+		};
+		nvs_get_str(nvsHandle, "passwd",(char *)&wificonfig.sta.password, &wifiLen);
+
+		uint8_t auth;
+		nvs_get_u8(nvsHandle, "authmetod",(uint8_t *)&auth);
+		wificonfig.sta.threshold.authmode = auth;
+		nvs_get_u8(nvsHandle, "authmetod",&wificonfig.sta.channel);
 	};
+
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 	ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wificonfig));
 	ESP_ERROR_CHECK(esp_wifi_start());
@@ -184,7 +202,7 @@ void app_main(void) {
 	ESP_LOGI(TAG, "event mageic started");
 	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-	ESP_LOGI(TAG, "done!!!!!");
+	ESP_LOGI(TAG, "wifi done");
 	
 	//command queue
 	TaskHandle_t queueExecuter;
@@ -208,9 +226,9 @@ void app_main(void) {
 		goto CLEANUPWITHSOC;
 	}
 	struct pollfd lisener = {
-	    .fd = soc,
-	    .events = POLLIN | POLLERR,
-	    .revents = 0,
+		.fd = soc,
+		.events = POLLIN | POLLERR,
+		.revents = 0,
 	};
 	struct connection cons[NUMBEROFCON];
 	memset(cons, 0, sizeof(struct connection) * NUMBEROFCON);
@@ -227,7 +245,7 @@ void app_main(void) {
 				goto DONTADDCON;
 			}
 			cons[connectionId].fd =
-			    lwip_accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
+				lwip_accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
 			if(cons[connectionId].fd < 0) {
 				cons[connectionId].valid = false;
 			} else {
@@ -239,7 +257,7 @@ void app_main(void) {
 			ESP_LOGE(TAG, "failed to lisen soc jumping to cleanup");
 			goto CLEANUPWITHSOC;
 		}
-	DONTADDCON:
+DONTADDCON:
 		fdnum = getValidConnectionsNum(cons, NUMBEROFCON, fds, fdids, NUMBEROFCON);
 		struct pollfd pollfds[fdnum];
 		for(int i = 0; i < fdnum; i++) {
