@@ -1,0 +1,6 @@
+key,type,encoding,value
+wifi_auth,namespace,,
+ssid,data,string,foo
+passwd,data,string,bar
+authmetod,data,u8,3
+channel,data,u8,1
