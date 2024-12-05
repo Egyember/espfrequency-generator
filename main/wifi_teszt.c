@@ -21,11 +21,8 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define SSID "IoT_gyak"
-#define PASSWD "12345678"
-#define AUTMETOD WIFI_AUTH_WPA2_PSK
-#define WIFICHANEL 1
 #define WIFIDONEBIT BIT0
+#define WIFIFAILED BIT1
 #define NUMBEROFCON 14
 
 #define COMPORT 40001
@@ -170,6 +167,7 @@ void app_main(void) {
 			esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
 
 	wifi_config_t wificonfig = {};
+WIFISETUP:
 	// reading config from nvs
 	nvs_handle_t nvsHandle;
 	{
@@ -179,6 +177,7 @@ void app_main(void) {
 		if(wifiLen > 32) {
 			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
 			btsetup(); // todo: implemnet
+			goto WIFISETUP;
 		};
 		nvs_get_str(nvsHandle, "ssid", (char *)&wificonfig.sta.ssid, &wifiLen);
 
@@ -186,13 +185,14 @@ void app_main(void) {
 		if(wifiLen > 64) { //implemention limit to passwd lenght is 64
 			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
 			btsetup(); // todo: implemnet
+			goto WIFISETUP;
 		};
 		nvs_get_str(nvsHandle, "passwd",(char *)&wificonfig.sta.password, &wifiLen);
 
 		uint8_t auth;
 		nvs_get_u8(nvsHandle, "authmetod",(uint8_t *)&auth);
 		wificonfig.sta.threshold.authmode = auth;
-		nvs_get_u8(nvsHandle, "authmetod",&wificonfig.sta.channel);
+		nvs_get_u8(nvsHandle, "channel",&wificonfig.sta.channel);
 	};
 
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -200,7 +200,7 @@ void app_main(void) {
 	ESP_ERROR_CHECK(esp_wifi_start());
 	ESP_LOGI(TAG, "wifi_init_sta finished.");
 	ESP_LOGI(TAG, "event mageic started");
-	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY);
+	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY); //todo: add fail bit and check
 
 	ESP_LOGI(TAG, "wifi done");
 	
