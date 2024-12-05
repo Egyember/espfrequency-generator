@@ -1,5 +1,12 @@
 #include "nvs.h"
 #include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+#include "esp_log.h"
+#include "esp_err.h"
+
+#define BT_TAG "btconfig"
 
 void writeNvs(char* ssid, char* passwd, int channel, int auth){
 	nvs_handle_t nvsHandle;
@@ -13,5 +20,6 @@ void writeNvs(char* ssid, char* passwd, int channel, int auth){
 };
 
 void btconfig(){
-
+	esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT(); 
+	ESP_ERROR_CHECK( esp_bt_controller_init(&bt_cfg));
 };

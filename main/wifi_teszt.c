@@ -20,6 +20,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#include "btconfig.h"
 
 #define WIFIDONEBIT BIT0
 #define WIFIFAILED BIT1
@@ -176,7 +177,7 @@ WIFISETUP:
 		nvs_get_str(nvsHandle, "ssid", NULL, &wifiLen);
 		if(wifiLen > 32) {
 			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
-			btsetup(); // todo: implemnet
+			btconfig(); // todo: implemnet
 			goto WIFISETUP;
 		};
 		nvs_get_str(nvsHandle, "ssid", (char *)&wificonfig.sta.ssid, &wifiLen);
@@ -184,7 +185,7 @@ WIFISETUP:
 		nvs_get_str(nvsHandle, "passwd", NULL, &wifiLen);
 		if(wifiLen > 64) { //implemention limit to passwd lenght is 64
 			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
-			btsetup(); // todo: implemnet
+			btconfig(); // todo: implemnet
 			goto WIFISETUP;
 		};
 		nvs_get_str(nvsHandle, "passwd",(char *)&wificonfig.sta.password, &wifiLen);
