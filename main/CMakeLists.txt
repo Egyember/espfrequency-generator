@@ -6,5 +6,6 @@ idf_component_register(
 	REQUIRES esp_wifi
 	REQUIRES broadcaster
 	REQUIRES commands
+	REQUIRES btconfig
 )
 nvs_create_partition_image("nvs" "./nvs.csv" "nvs")
