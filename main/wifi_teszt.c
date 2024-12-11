@@ -1,4 +1,5 @@
 #include "broadcaster.h"
+#include "btconfig.h"
 #include "commands.h"
 #include "esp_err.h"
 #include "esp_event.h"
@@ -15,12 +16,11 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "sys/poll.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <assert.h>
-#include "btconfig.h"
 
 #define WIFIDONEBIT BIT0
 #define WIFIFAILED BIT1
@@ -45,7 +45,7 @@ struct connection {
 };
 
 int getValidConnectionsNum(const struct connection *connections, const unsigned int conectionsNumber, int *target,
-		int *targetId, const unsigned int targetSize) {
+			   int *targetId, const unsigned int targetSize) {
 	int output = 0;
 	for(int i = 0; i < conectionsNumber; i++) {
 		if(connections[i].valid) {
@@ -79,26 +79,32 @@ void closeConnection(struct connection *connection) {
 
 struct localIp *localIp;
 
+int retry = 0;
 void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 	if(event_base == WIFI_EVENT) {
 		ESP_LOGI(TAG, "wifi event");
 		switch(event_id) {
-			case WIFI_EVENT_STA_START:
-				esp_wifi_connect();
+		case WIFI_EVENT_STA_START:
+			esp_wifi_connect();
+			break;
+		case WIFI_EVENT_STA_CONNECTED:
+			ESP_LOGI(TAG, "connected to wifi");
+			esp_err_t err = esp_netif_dhcpc_start(arg);
+			if(err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+				ESP_LOGI(TAG, "dhcp aready running");
+			};
+			break;
+		case WIFI_EVENT_STA_DISCONNECTED:
+			ESP_LOGI(TAG, "disconected trying to reconnect");
+			retry++;
+			if(retry > 3) {
+				xEventGroupSetBits(wifi_eventGroup, WIFIFAILED);
 				break;
-			case WIFI_EVENT_STA_CONNECTED:
-				ESP_LOGI(TAG, "connected to wifi");
-				esp_err_t err = esp_netif_dhcpc_start(arg);
-				if(err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-					ESP_LOGI(TAG, "dhcp aready running");
-				};
-				break;
-			case WIFI_EVENT_STA_DISCONNECTED:
-				ESP_LOGI(TAG, "disconected trying to reconnect");
-				esp_wifi_connect();
-				break;
-			default:
-				ESP_LOGI(TAG, "unhandelered event");
+			};
+			esp_wifi_connect();
+			break;
+		default:
+			ESP_LOGI(TAG, "unhandelered event");
 		}
 	}
 };
@@ -114,9 +120,10 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 			localIp->ip = event->ip_info.ip.addr;
 			localIp->mask = event->ip_info.netmask.addr;
 			xTaskCreate(broadcaster, "broadcaster", 1024 * 2, localIp, tskIDLE_PRIORITY,
-					&(localIp->broadcaster));
+				    &(localIp->broadcaster));
 			xSemaphoreGive(localIp->lock);
 			xEventGroupSetBits(wifi_eventGroup, WIFIDONEBIT);
+			retry = 0;
 
 		} else if(event_id == IP_EVENT_STA_LOST_IP) {
 			xSemaphoreTake(localIp->lock, portMAX_DELAY);
@@ -126,17 +133,17 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 	}
 };
 
-void commandloop(QueueHandle_t *queue){
-	if (queue == NULL) {
+void commandloop(QueueHandle_t *queue) {
+	if(queue == NULL) {
 		ESP_LOGE(TAG, "worng queue");
 		return;
 	};
-	while (true) {
+	while(true) {
 		command *com = NULL;
 		ESP_LOGI(TAG, "ok");
-		xQueueReceive( *queue, &com, portMAX_DELAY);
+		xQueueReceive(*queue, &com, portMAX_DELAY);
 		ESP_LOGI(TAG, "?ok");
-		if(com != NULL){
+		if(com != NULL) {
 			doCommand(com);
 			freeCommand(com);
 		};
@@ -163,9 +170,9 @@ void app_main(void) {
 	localIp->lock = xSemaphoreCreateMutex();
 
 	ESP_ERROR_CHECK(
-			esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint, &wifieventh));
+	    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, netint, &wifieventh));
 	ESP_ERROR_CHECK(
-			esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
+	    esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, netint, &ipeventh));
 
 	wifi_config_t wificonfig = {};
 WIFISETUP:
@@ -183,33 +190,41 @@ WIFISETUP:
 		nvs_get_str(nvsHandle, "ssid", (char *)&wificonfig.sta.ssid, &wifiLen);
 
 		nvs_get_str(nvsHandle, "passwd", NULL, &wifiLen);
-		if(wifiLen > 64) { //implemention limit to passwd lenght is 64
+		if(wifiLen > 64) { // implemention limit to passwd lenght is 64
 			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
 			btconfig(); // todo: implemnet
 			goto WIFISETUP;
 		};
-		nvs_get_str(nvsHandle, "passwd",(char *)&wificonfig.sta.password, &wifiLen);
+		nvs_get_str(nvsHandle, "passwd", (char *)&wificonfig.sta.password, &wifiLen);
 
 		uint8_t auth;
-		nvs_get_u8(nvsHandle, "authmetod",(uint8_t *)&auth);
+		nvs_get_u8(nvsHandle, "authmetod", (uint8_t *)&auth);
 		wificonfig.sta.threshold.authmode = auth;
-		nvs_get_u8(nvsHandle, "channel",&wificonfig.sta.channel);
+		nvs_get_u8(nvsHandle, "channel", &wificonfig.sta.channel);
 	};
 
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 	ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wificonfig));
 	ESP_ERROR_CHECK(esp_wifi_start());
 	ESP_LOGI(TAG, "wifi_init_sta finished.");
-	ESP_LOGI(TAG, "event mageic started");
-	xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT, pdFALSE, pdFALSE, portMAX_DELAY); //todo: add fail bit and check
+	ESP_LOGI(TAG, "event magic started");
+	EventBits_t bits = xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT | WIFIFAILED, pdTRUE, pdFALSE,
+					       portMAX_DELAY); // todo: add fail bit and check
+	if (bits | WIFIFAILED) {
+		ESP_LOGI(TAG, "event magic failed entering config mode");
+		btconfig();
+		ESP_LOGI(TAG, "Jumping to wifi setup");
+		goto WIFISETUP;
+	};
 
 	ESP_LOGI(TAG, "wifi done");
-	
-	//command queue
+
+	// command queue
 	TaskHandle_t queueExecuter;
-	QueueHandle_t commandQueue = xQueueCreate(QUEUELENGTH, sizeof(command*));
-	xTaskCreate((void (*)(void *)) commandloop, "command loop", 1024*5, &commandQueue, tskIDLE_PRIORITY+1, &queueExecuter);
-	//starting tcp server
+	QueueHandle_t commandQueue = xQueueCreate(QUEUELENGTH, sizeof(command *));
+	xTaskCreate((void (*)(void *))commandloop, "command loop", 1024 * 5, &commandQueue, tskIDLE_PRIORITY + 1,
+		    &queueExecuter);
+	// starting tcp server
 	int soc = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = htons(COMPORT)
 
@@ -227,9 +242,9 @@ WIFISETUP:
 		goto CLEANUPWITHSOC;
 	}
 	struct pollfd lisener = {
-		.fd = soc,
-		.events = POLLIN | POLLERR,
-		.revents = 0,
+	    .fd = soc,
+	    .events = POLLIN | POLLERR,
+	    .revents = 0,
 	};
 	struct connection cons[NUMBEROFCON];
 	memset(cons, 0, sizeof(struct connection) * NUMBEROFCON);
@@ -246,7 +261,7 @@ WIFISETUP:
 				goto DONTADDCON;
 			}
 			cons[connectionId].fd =
-				lwip_accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
+			    lwip_accept(soc, (struct sockaddr *)&cons[connectionId].target, &sockaddr_storage_len);
 			if(cons[connectionId].fd < 0) {
 				cons[connectionId].valid = false;
 			} else {
@@ -258,7 +273,7 @@ WIFISETUP:
 			ESP_LOGE(TAG, "failed to lisen soc jumping to cleanup");
 			goto CLEANUPWITHSOC;
 		}
-DONTADDCON:
+	DONTADDCON:
 		fdnum = getValidConnectionsNum(cons, NUMBEROFCON, fds, fdids, NUMBEROFCON);
 		struct pollfd pollfds[fdnum];
 		for(int i = 0; i < fdnum; i++) {
@@ -290,7 +305,7 @@ DONTADDCON:
 					continue;
 				};
 				ESP_LOGI(TAG, "adding to queue");
-				if (xQueueSend(commandQueue, &com, 0) == errQUEUE_FULL) {
+				if(xQueueSend(commandQueue, &com, 0) == errQUEUE_FULL) {
 					freeCommand(com);
 					ESP_LOGI(TAG, "command queue full dropping command");
 				};
@@ -299,9 +314,9 @@ DONTADDCON:
 	}
 CLEANUPWITHSOC:
 	close(soc);
-CLEANUP:
 	vTaskDelete(queueExecuter);
 	vQueueDelete(commandQueue);
+CLEANUP:
 	esp_wifi_stop();
 	esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifieventh);
 	esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, ipeventh);

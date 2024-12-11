@@ -8,4 +8,3 @@ idf_component_register(
 	REQUIRES commands
 	REQUIRES btconfig
 )
-nvs_create_partition_image("nvs" "./nvs.csv" "nvs")

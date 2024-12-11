@@ -22,4 +22,5 @@ void writeNvs(char* ssid, char* passwd, int channel, int auth){
 void btconfig(){
 	esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT(); 
 	ESP_ERROR_CHECK( esp_bt_controller_init(&bt_cfg));
+ESP_LOGE(BT_TAG, "not implemented");
 };

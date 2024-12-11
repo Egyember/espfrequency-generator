@@ -6,3 +6,4 @@ cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(wifi_teszt)
+nvs_create_partition_image("nvs" "./nvs.csv" FLASH_IN_PROJECT "nvs" "./nvs.csv")
