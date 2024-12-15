@@ -14,7 +14,7 @@ struct localIp{
 
 static const char *BRTAG = "broadcaster";
 static char *brbuff = "hello sir";
-void sendBroadcast(int soc){
+static void sendBroadcast(int soc){
 	int err = send(soc, brbuff, strlen(brbuff), 0);
 	if (err<0) {
 		ESP_LOGI(BRTAG, "failed to send");
