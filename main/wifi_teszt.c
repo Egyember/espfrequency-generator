@@ -30,7 +30,7 @@
 
 #define QUEUELENGTH 32
 
-static const char *TAG = "wifi_teszt";
+static const char *MAIN_TAG = "MAIN";
 EventGroupHandle_t wifi_eventGroup;
 struct localIp {
 	uint32_t ip;
@@ -82,20 +82,20 @@ struct localIp *localIp;
 int retry = 0;
 void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 	if(event_base == WIFI_EVENT) {
-		ESP_LOGI(TAG, "wifi event");
+		ESP_LOGI(MAIN_TAG, "wifi event");
 		switch(event_id) {
 		case WIFI_EVENT_STA_START:
 			esp_wifi_connect();
 			break;
 		case WIFI_EVENT_STA_CONNECTED:
-			ESP_LOGI(TAG, "connected to wifi");
+			ESP_LOGI(MAIN_TAG, "connected to wifi");
 			esp_err_t err = esp_netif_dhcpc_start(arg);
 			if(err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-				ESP_LOGI(TAG, "dhcp aready running");
+				ESP_LOGI(MAIN_TAG, "dhcp aready running");
 			};
 			break;
 		case WIFI_EVENT_STA_DISCONNECTED:
-			ESP_LOGI(TAG, "disconected trying to reconnect");
+			ESP_LOGI(MAIN_TAG, "disconected trying to reconnect");
 			retry++;
 			if(retry > 3) {
 				xEventGroupSetBits(wifi_eventGroup, WIFIFAILED);
@@ -104,18 +104,18 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id
 			esp_wifi_connect();
 			break;
 		default:
-			ESP_LOGI(TAG, "unhandelered event");
+			ESP_LOGI(MAIN_TAG, "unhandelered event");
 		}
 	}
 };
 
 void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 	if(event_base == IP_EVENT) {
-		ESP_LOGI(TAG, "ip event");
+		ESP_LOGI(MAIN_TAG, "ip event");
 		if(event_id == IP_EVENT_STA_GOT_IP) {
 			// ESP_ERROR_CHECK(esp_netif_dhcpc_stop(arg));
 			ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-			ESP_LOGI(TAG, "static ip:" IPSTR, IP2STR(&event->ip_info.ip));
+			ESP_LOGI(MAIN_TAG, "static ip:" IPSTR, IP2STR(&event->ip_info.ip));
 			xSemaphoreTake(localIp->lock, portMAX_DELAY);
 			localIp->ip = event->ip_info.ip.addr;
 			localIp->mask = event->ip_info.netmask.addr;
@@ -126,6 +126,7 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 			retry = 0;
 
 		} else if(event_id == IP_EVENT_STA_LOST_IP) {
+			ESP_LOGI(MAIN_TAG, "lost ip address");
 			xSemaphoreTake(localIp->lock, portMAX_DELAY);
 			vTaskDelete(localIp->broadcaster);
 			xSemaphoreGive(localIp->lock);
@@ -135,14 +136,14 @@ void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, 
 
 void commandloop(QueueHandle_t *queue) {
 	if(queue == NULL) {
-		ESP_LOGE(TAG, "worng queue");
+		ESP_LOGE(MAIN_TAG, "worng queue");
 		return;
 	};
 	while(true) {
 		command *com = NULL;
-		ESP_LOGI(TAG, "ok");
+		ESP_LOGI(MAIN_TAG, "ok");
 		xQueueReceive(*queue, &com, portMAX_DELAY);
-		ESP_LOGI(TAG, "?ok");
+		ESP_LOGI(MAIN_TAG, "?ok");
 		if(com != NULL) {
 			doCommand(com);
 			freeCommand(com);
@@ -152,14 +153,14 @@ void commandloop(QueueHandle_t *queue) {
 void app_main(void) {
 	ESP_ERROR_CHECK(nvs_flash_init());
 
-	ESP_LOGI(TAG, "seting up wifi");
+	ESP_LOGI(MAIN_TAG, "seting up wifi");
 	wifi_eventGroup = xEventGroupCreate();
 	ESP_ERROR_CHECK(esp_event_loop_create_default());
 	ESP_ERROR_CHECK(esp_netif_init());
 	esp_netif_t *netint = esp_netif_create_default_wifi_sta();
 	if(netint == NULL) {
-		ESP_LOGE(TAG, "netif == NULL");
-		ESP_LOGE(TAG, "jumping to cleanup");
+		ESP_LOGE(MAIN_TAG, "netif == NULL");
+		ESP_LOGE(MAIN_TAG, "jumping to cleanup");
 		goto CLEANUP;
 	}
 	wifi_init_config_t wifiInitconf = WIFI_INIT_CONFIG_DEFAULT();
@@ -183,15 +184,16 @@ WIFISETUP:
 		size_t wifiLen;
 		nvs_get_str(nvsHandle, "ssid", NULL, &wifiLen);
 		if(wifiLen > 32) {
-			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
+			ESP_LOGE(MAIN_TAG, "too long ssid stored in nvs. Jumping to bt setup");
 			btconfig(); // todo: implemnet
+			retry = 0;
 			goto WIFISETUP;
 		};
 		nvs_get_str(nvsHandle, "ssid", (char *)&wificonfig.sta.ssid, &wifiLen);
 
 		nvs_get_str(nvsHandle, "passwd", NULL, &wifiLen);
 		if(wifiLen > 64) { // implemention limit to passwd lenght is 64
-			ESP_LOGE(TAG, "too long ssid stored in nvs. Jumping to bt setup");
+			ESP_LOGE(MAIN_TAG, "too long ssid stored in nvs. Jumping to bt setup");
 			btconfig(); // todo: implemnet
 			goto WIFISETUP;
 		};
@@ -202,22 +204,23 @@ WIFISETUP:
 		wificonfig.sta.threshold.authmode = auth;
 		nvs_get_u8(nvsHandle, "channel", &wificonfig.sta.channel);
 	};
+	ESP_LOGI(MAIN_TAG, "ssid: %s, password:%s, channel: %d", wificonfig.sta.ssid, wificonfig.sta.password, wificonfig.sta.channel);
 
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 	ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wificonfig));
 	ESP_ERROR_CHECK(esp_wifi_start());
-	ESP_LOGI(TAG, "wifi_init_sta finished.");
-	ESP_LOGI(TAG, "event magic started");
+	ESP_LOGI(MAIN_TAG, "wifi_init_sta finished.");
+	ESP_LOGI(MAIN_TAG, "event magic started");
 	EventBits_t bits = xEventGroupWaitBits(wifi_eventGroup, WIFIDONEBIT | WIFIFAILED, pdTRUE, pdFALSE,
 					       portMAX_DELAY); // todo: add fail bit and check
 	if (bits | WIFIFAILED) {
-		ESP_LOGI(TAG, "event magic failed entering config mode");
+		ESP_LOGI(MAIN_TAG, "event magic failed entering config mode");
 		btconfig();
-		ESP_LOGI(TAG, "Jumping to wifi setup");
+		ESP_LOGI(MAIN_TAG, "Jumping to wifi setup");
 		goto WIFISETUP;
 	};
 
-	ESP_LOGI(TAG, "wifi done");
+	ESP_LOGI(MAIN_TAG, "wifi done");
 
 	// command queue
 	TaskHandle_t queueExecuter;
@@ -231,13 +234,13 @@ WIFISETUP:
 	};
 	int err = bind(soc, (struct sockaddr *)&addr, sizeof(addr));
 	if(err < 0) {
-		ESP_LOGE(TAG, "failed to bind soc jumping to cleanup");
+		ESP_LOGE(MAIN_TAG, "failed to bind soc jumping to cleanup");
 		close(soc);
 		goto CLEANUPWITHSOC;
 	}
 	err = listen(soc, 1);
 	if(err < 0) {
-		ESP_LOGE(TAG, "failed to lisen soc jumping to cleanup");
+		ESP_LOGE(MAIN_TAG, "failed to lisen soc jumping to cleanup");
 		close(soc);
 		goto CLEANUPWITHSOC;
 	}
@@ -257,7 +260,7 @@ WIFISETUP:
 		if(lisener.revents & POLLIN) {
 			int connectionId = getFreeConnection(cons, NUMBEROFCON);
 			if(connectionId < 0) {
-				ESP_LOGI(TAG, "no free connection slot left");
+				ESP_LOGI(MAIN_TAG, "no free connection slot left");
 				goto DONTADDCON;
 			}
 			cons[connectionId].fd =
@@ -270,7 +273,7 @@ WIFISETUP:
 			};
 		}
 		if(lisener.revents & POLLERR) {
-			ESP_LOGE(TAG, "failed to lisen soc jumping to cleanup");
+			ESP_LOGE(MAIN_TAG, "failed to lisen soc jumping to cleanup");
 			goto CLEANUPWITHSOC;
 		}
 	DONTADDCON:
@@ -285,29 +288,29 @@ WIFISETUP:
 			vTaskDelay(100 / portTICK_PERIOD_MS);
 			continue;
 		}
-		ESP_LOGI(TAG, "2th poll loop");
+		ESP_LOGI(MAIN_TAG, "2th poll loop");
 		poll((struct pollfd *)&pollfds, fdnum, -1);
-		ESP_LOGI(TAG, "2th poll done loop");
+		ESP_LOGI(MAIN_TAG, "2th poll done loop");
 		for(int i = 0; i < fdnum; i++) {
 			printf("pollfds[%d].revents = %x\n", i, pollfds[i].revents);
 			if(pollfds[i].revents & POLLERR) {
-				ESP_LOGI(TAG, "cleaing up bad connection");
+				ESP_LOGI(MAIN_TAG, "cleaing up bad connection");
 				closeConnection(&(cons[fdids[i]]));
 				continue;
 			}
 			if(pollfds[i].revents & POLLIN) {
 				command *com = readCommand(pollfds[i].fd);
-				ESP_LOGI(TAG, "got command");
+				ESP_LOGI(MAIN_TAG, "got command");
 				if(com == NULL) {
-					ESP_LOGE(TAG, "NULL command");
-					ESP_LOGE(TAG, "closing connection");
+					ESP_LOGE(MAIN_TAG, "NULL command");
+					ESP_LOGE(MAIN_TAG, "closing connection");
 					closeConnection(&(cons[fdids[i]]));
 					continue;
 				};
-				ESP_LOGI(TAG, "adding to queue");
+				ESP_LOGI(MAIN_TAG, "adding to queue");
 				if(xQueueSend(commandQueue, &com, 0) == errQUEUE_FULL) {
 					freeCommand(com);
-					ESP_LOGI(TAG, "command queue full dropping command");
+					ESP_LOGI(MAIN_TAG, "command queue full dropping command");
 				};
 			};
 		};
