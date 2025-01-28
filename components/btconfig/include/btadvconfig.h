@@ -1,0 +1,113 @@
+#ifndef BTADVCONF
+#define BTADVCONF
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+
+static esp_attr_control_t autoResponse = {.auto_rsp = ESP_GATT_AUTO_RSP};
+
+enum characteristics {
+	ch_SSID = 0,
+	ch_PASSWD = 1,
+	ch_CHANNEL = 2,
+	ch_AUTHMETOD = 3,
+	ch_DONE = 4,
+	ch_NUM = 5,
+};
+static const uint8_t PROFILEUUID[] = {0xeb, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf,
+				0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf6};
+static const uint8_t CHARUUID[ch_NUM][16] = {
+    [ch_SSID] =      {0xeb, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf7},
+    [ch_PASSWD] =    {0xec, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf7},
+    [ch_CHANNEL] =   {0xed, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf7},
+    [ch_AUTHMETOD] = {0xee, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf7},
+    [ch_DONE] =      {0xef, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf7},
+};
+static const uint8_t CHARDECUUID[ch_NUM][16] = {
+    [ch_SSID] =      {0xeb, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf8},
+    [ch_PASSWD] =    {0xec, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf8},
+    [ch_CHANNEL] =   {0xed, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf8},
+    [ch_AUTHMETOD] = {0xee, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf8},
+    [ch_DONE] =      {0xef, 0x6c, 0xb4, 0xc7, 0x81, 0xc6, 0x4f, 0xaf, 0x92, 0x8d, 0x77, 0xd5, 0x2e, 0xcf, 0x23, 0xf8},
+};
+
+char ssid[32] = {0};
+char pass[32] = {0};
+uint8_t channel = {0};
+uint8_t authmetod = {0};
+uint8_t done = {0};
+esp_attr_value_t propvalue[ch_NUM] = {
+    [ch_SSID] =
+	{
+	    .attr_len = 32,
+	    .attr_max_len = 32,
+	    .attr_value = (uint8_t *)&ssid,
+	},
+    [ch_PASSWD] =
+	{
+	    .attr_len = 32,
+	    .attr_max_len = 32,
+	    .attr_value = (uint8_t *)&pass,
+	},
+    [ch_CHANNEL] =
+	{
+	    .attr_len = 1,
+	    .attr_max_len = 1,
+	    .attr_value = (uint8_t *)&channel,
+	},
+    [ch_AUTHMETOD] =
+	{
+	    .attr_len = 1,
+	    .attr_max_len = 1,
+	    .attr_value = (uint8_t *)&authmetod,
+	},
+    [ch_DONE] =
+	{
+	    .attr_len = 1,
+	    .attr_max_len = 1,
+	    .attr_value = (uint8_t *)&done,
+	},
+};
+
+static esp_ble_adv_data_t advConfig = {
+    .set_scan_rsp = true,
+    .include_name = true,
+    .include_txpower = true,
+    .min_interval = 0x06,
+    .max_interval = 0x10,
+    .appearance = 0,
+    .manufacturer_len = 0,
+    .p_manufacturer_data = NULL,
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = ESP_UUID_LEN_128,
+    .p_service_uuid = (uint8_t *)&(PROFILEUUID[0]),
+    .flag = ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT,
+};
+
+static esp_ble_adv_params_t advParams = {
+    .adv_int_min = 0x20,
+    .adv_int_max = 0x40,
+    .adv_type = ADV_TYPE_IND,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    //.peer_addr            =
+    //.peer_addr_type       =
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
+
+struct gatts_profile_inst {
+	esp_gatts_cb_t gatts_cb;
+	uint16_t gatts_if;
+	uint16_t app_id;
+	uint16_t conn_id;
+	uint16_t service_handle;
+	esp_gatt_srvc_id_t service_id;
+	uint16_t char_handle[ch_NUM];
+	esp_bt_uuid_t char_uuid[ch_NUM];
+	esp_gatt_perm_t perm;
+	esp_gatt_char_prop_t property;
+	uint16_t descr_handle;
+	esp_bt_uuid_t descr_uuid[ch_NUM];
+};
+
+#endif
